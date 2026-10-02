@@ -1,0 +1,9 @@
+.settings
+build
+.clang-format
+.clangd
+.cproject
+.project
+LICENSE
+sdkconfig
+main/Kconfig*
