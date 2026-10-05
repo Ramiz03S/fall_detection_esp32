@@ -1,30 +1,40 @@
 #include "i2c.h"
 #include "driver/i2c_master.h"
 #include "lsm6dsox_reg.h"
+#include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include <stdint.h>
+#include <inttypes.h>
+
+float acc_16g_sensitivity = 0.488;
+float gyro_2000dps_sensitivity = 70;
 
 char * sensor_names[6] = {"gyro_x", "gyro_y", "gyro_z", "acc_x", "acc_y", "acc_z"};
+
 static i2c_master_bus_handle_t bus_handle;
 static i2c_master_dev_handle_t imu_handle;
 static const uint8_t IMU_ADDR = 0x6A;
 uint32_t timeout = 50;
 
 static const uint8_t ctrl3_c_addr = LSM6DSOX_CTRL3_C;
-static lsm6dsox_reg_t ctrl3_c_value; // = {.ctrl3_c = { .bdu = 1, .if_inc = 1}};
+static lsm6dsox_reg_t ctrl3_c_value;
 
-// static const uint8_t status_reg_addr = LSM6DSOX_STATUS_REG;
+static const uint8_t status_reg_addr = LSM6DSOX_STATUS_REG;
+static lsm6dsox_reg_t status_reg_value;
+
 static const uint8_t who_am_i_addr = LSM6DSOX_SPI2_WHO_AM_I;
 
 static const uint8_t ctrl1_xl_addr = LSM6DSOX_CTRL1_XL;
-static lsm6dsox_reg_t ctrl1_x1_value;// = {.ctrl1_xl = {.odr_xl = 0b0100, .fs_xl = 0b01}}; // 104 Hz, 16 g range
+static lsm6dsox_reg_t ctrl1_x1_value;
 
 static const uint8_t ctrl8_xl_addr = LSM6DSOX_CTRL8_XL;
-static lsm6dsox_reg_t ctrl8_xl_value; //= {.ctrl8_xl = {.xl_fs_mode = 0}};
+static lsm6dsox_reg_t ctrl8_xl_value;
 
 static const uint8_t ctrl2_g_addr = LSM6DSOX_CTRL2_G;
-static lsm6dsox_reg_t ctrl2_g_value; //= {.ctrl2_g = {.odr_g = 0b0100, .fs_g = 0b11}}; // 104 Hz, 16 g range
+static lsm6dsox_reg_t ctrl2_g_value;
 
-static const uint8_t outx_l_g = LSM6DSOX_OUTX_L_G;
+static const uint8_t outx_l_g_addr = LSM6DSOX_OUTX_L_G;
 
 void print_bits(const char *label, uint8_t value){
     char bits[10];  // 8 bits + 1 space + '\0'
@@ -95,9 +105,9 @@ int configure_IMU(){
 	esp_err_t ret;
 	
 	ret = read_bytes_from_reg(&ctrl3_c_addr, &ctrl3_c_value.byte, 1);
-	print_bits("ctrl3_c_value1", ctrl3_c_value.byte);
+	//print_bits("ctrl3_c_value1", ctrl3_c_value.byte);
 	ctrl3_c_value.ctrl3_c.sw_reset = 1;
-	print_bits("ctrl3_c_value2", ctrl3_c_value.byte);
+	//print_bits("ctrl3_c_value2", ctrl3_c_value.byte);
 	ret = write_byte_to_reg(ctrl3_c_addr, ctrl3_c_value.byte);
 	for(;;){
 		ret = read_bytes_from_reg(&ctrl3_c_addr, &ctrl3_c_value.byte, 1);
@@ -105,29 +115,29 @@ int configure_IMU(){
 			break;
 		}
 	}
-	print_bits("ctrl3_c_value3", ctrl3_c_value.byte);
-	ctrl3_c_value.ctrl3_c.bdu = 1;
-	print_bits("ctrl3_c_value4", ctrl3_c_value.byte);
+	//print_bits("ctrl3_c_value3", ctrl3_c_value.byte);
+	ctrl3_c_value.ctrl3_c.bdu = 1; 
+	//print_bits("ctrl3_c_value4", ctrl3_c_value.byte);
 	ret = write_byte_to_reg(ctrl3_c_addr, ctrl3_c_value.byte);
 	
 	ret = read_bytes_from_reg(&ctrl8_xl_addr, &ctrl8_xl_value.byte, 1);
-	print_bits("ctrl8_xl_value1", ctrl8_xl_value.byte);
-	ctrl8_xl_value.ctrl8_xl.xl_fs_mode = 0;
-	print_bits("ctrl8_xl_value2", ctrl8_xl_value.byte);
+	//print_bits("ctrl8_xl_value1", ctrl8_xl_value.byte);
+	ctrl8_xl_value.ctrl8_xl.xl_fs_mode = 0; // enable the FS of acc to reach 16 g
+	//print_bits("ctrl8_xl_value2", ctrl8_xl_value.byte);
 	ret = write_byte_to_reg(ctrl8_xl_addr, ctrl8_xl_value.byte);
 	
 	ret = read_bytes_from_reg(&ctrl1_xl_addr, &ctrl1_x1_value.byte, 1);
-	print_bits("ctrl1_x1_value", ctrl1_x1_value.byte);
-	ctrl1_x1_value.ctrl1_xl.odr_xl = 0b0100;
-	ctrl1_x1_value.ctrl1_xl.fs_xl = 0b01;
-	print_bits("ctrl1_x1_value2", ctrl1_x1_value.byte);
+	//print_bits("ctrl1_x1_value", ctrl1_x1_value.byte);
+	ctrl1_x1_value.ctrl1_xl.odr_xl = 0b0100; // 104 Hz
+	ctrl1_x1_value.ctrl1_xl.fs_xl = 0b01; // 16 g
+	//print_bits("ctrl1_x1_value2", ctrl1_x1_value.byte);
 	ret = write_byte_to_reg(ctrl1_xl_addr, ctrl1_x1_value.byte);
 	
 	ret = read_bytes_from_reg(&ctrl2_g_addr, &ctrl2_g_value.byte, 1);
-	print_bits("ctrl2_g_value", ctrl2_g_value.byte);	
-	ctrl2_g_value.ctrl2_g.odr_g = 0b0100;
-	ctrl2_g_value.ctrl2_g.fs_g = 0b110;
-	print_bits("ctrl2_g_value2", ctrl2_g_value.byte);	
+	//print_bits("ctrl2_g_value", ctrl2_g_value.byte);	
+	ctrl2_g_value.ctrl2_g.odr_g = 0b0100; // 104 Hz
+	ctrl2_g_value.ctrl2_g.fs_g = 0b110; // 2000 dps
+	//print_bits("ctrl2_g_value2", ctrl2_g_value.byte);	
 	ret = write_byte_to_reg(ctrl2_g_addr, ctrl2_g_value.byte);
 	
 	
@@ -135,18 +145,48 @@ int configure_IMU(){
 	
 }
 
+
 void print_sensor_values(){
-	uint8_t read_buffer[12] = {0};
-	int16_t sensor_buffer[6] = {0};
 	
-	read_bytes_from_reg(&outx_l_g, read_buffer, 12);
+	uint8_t read_buffer[12] = {0};
+	float f_sensor_buffer[6] = {0};
+	
+	read_bytes_from_reg(&outx_l_g_addr, read_buffer, 12);
 	
 	for(uint8_t i = 0; i < 6; i++){
-		sensor_buffer[i] = (int16_t)((read_buffer[i*2+1] << 8) | read_buffer[i*2]);
-		printf("%s%s: %6d ", i == 0 ? "\r" : "", sensor_names[i], sensor_buffer[i]);
+		float sensitivity = i < 3 ? gyro_2000dps_sensitivity : acc_16g_sensitivity;
+		f_sensor_buffer[i] = (int16_t)((read_buffer[i*2+1] << 8) | read_buffer[i*2]) * sensitivity * (float)0.001;
+		printf("%s%s: %9.3f ", i == 0 ? "\r" : "", sensor_names[i], f_sensor_buffer[i]);
 	}
 	fflush(stdout);
 	
+}
+
+void transmit_sensor_csv(void *pvParameters){
+	
+	uint8_t read_buffer[12] = {0};
+	float f_sensor_buffer[6] = {0};
+	int64_t time_ms;
+	
+	while(true){
+		read_bytes_from_reg(&status_reg_addr, &status_reg_value.byte, 1);
+		if(status_reg_value.status_reg.gda && status_reg_value.status_reg.xlda){
+			
+			read_bytes_from_reg(&outx_l_g_addr, read_buffer, 12);
+				
+			for(uint8_t i = 0; i < 6; i++){
+				float sensitivity = i < 3 ? gyro_2000dps_sensitivity : acc_16g_sensitivity;
+				f_sensor_buffer[i] = (int16_t)((read_buffer[i*2+1] << 8) | read_buffer[i*2]) * sensitivity * (float)0.001;
+			}
+			time_ms = esp_timer_get_time() / 1000;
+
+				printf("%" PRId64 ",%.2f,%.2f,%.2f,%.4f,%.4f,%.4f\n",time_ms, f_sensor_buffer[0], f_sensor_buffer[1], f_sensor_buffer[2], f_sensor_buffer[3], f_sensor_buffer[4], f_sensor_buffer[5]);
+		}
+		else {
+			vTaskDelay(1);
+		}
+
+	}
 }
 
 

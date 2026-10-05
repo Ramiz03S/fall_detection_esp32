@@ -35,10 +35,8 @@ void app_main(void)
 	configure_IMU();
 	vTaskDelay(pdMS_TO_TICKS(100)); // discard 10 samples, settling time should be looked into more
 	
-    while (true) {
-        print_sensor_values();
-        vTaskDelay(pdMS_TO_TICKS(100));
-    }
+	BaseType_t result = xTaskCreatePinnedToCore(transmit_sensor_csv, "Sending sensor values to PC", 4096, NULL, 5, NULL, 0);
+	
 }
 
 

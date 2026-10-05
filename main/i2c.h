@@ -18,6 +18,7 @@ esp_err_t read_bytes_from_reg(const uint8_t *reg_addr, uint8_t *read_buffer, uin
 esp_err_t read_who_i_am(uint8_t * read_buffer, uint8_t len);
 esp_err_t configure_IMU();
 void print_sensor_values();
+void transmit_sensor_csv(void *pvParameters);
 
 
 #endif /* MAIN_I2C_H_ */
